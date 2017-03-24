@@ -6,6 +6,7 @@ import AWS from 'aws-sdk';
 
 const cogUserPoolId = 'us-east-1_CFgzYswbF';
 const cogClientId = '7dst2a1oo83qccu3m0m72sq2s6';
+const cogIdPoolId = 'us-east-1:41a89643-be20-4fd8-a9a3-346da49c0559';
 
 class App extends Component {
     constructor(props, context) {
@@ -132,17 +133,20 @@ class App extends Component {
         cognitoUser.authenticateUser(authenticationDetails, {
             onSuccess: function(result) {
                 console.log('access token + ' + result.getAccessToken().getJwtToken());
-
-                AWS.config.credentials = new AWS.CognitoIdentityCredentials({
-                    IdentityPoolId: 'us-east-1:41a89643-be20-4fd8-a9a3-346da49c0559', // your identity pool id here
+                var creds = new AWS.CognitoIdentityCredentials({
+                    IdentityPoolId: cogIdPoolId, // your identity pool id here
                     Logins: {
                         // Change the key below according to the specific region your user pool is in.
                         'cognito-idp.us-east-1.amazonaws.com/us-east-1_CFgzYswbF': result.getIdToken().getJwtToken()
                     }
                 });
+                AWS.config.credentials = creds;
+                console.error(creds);
+
 
                 // Instantiate aws sdk service objects now that the credentials have been updated.
-                // example: var s3 = new AWS.S3();
+                var s3 = new AWS.S3();
+                s3.listBuckets();
 
             },
 
@@ -155,37 +159,128 @@ class App extends Component {
     }
 
     fetchPrivateFeatured() {
-        console.log("fetchPrivateFeatured");
+      var that = this;
+      var poolData = {
+        UserPoolId : cogUserPoolId, // Your user pool id here
+        ClientId : cogClientId // Your client id here
+      };
+      var userPool = new CognitoUserPool(poolData);
+      var cognitoUser = userPool.getCurrentUser();
 
-        var poolData = {
-            UserPoolId: cogUserPoolId, // Your user pool id here
-            ClientId: cogClientId // Your client id here
-        };
-        var userPool = new CognitoUserPool(poolData);
-        var cognitoUser = userPool.getCurrentUser();
-        this.setState({
-          username: cognitoUser.getUsername()
-        });
+      if (cognitoUser != null) {
+        cognitoUser.getSession(function(err, session) {
+            if (err) {
+                alert(err);
+                return;
+            }
+            console.log('session validity: ' + session.isValid());
 
-        console.log(cognitoUser);
-
-        if(cognitoUser){
-          cognitoUser.getSession((error,result) => {
-            const token = result.getIdToken().getJwtToken();
-            console.log(token);
-            const url = "https://7v2h1zna5k.execute-api.us-east-1.amazonaws.com/production/load_private_featured";
-            const authHeader = new Headers({
-              "method.request.header.Authorization": token,
-              "Authorization": token,
+            // NOTE: getSession must be called to authenticate user before calling getUserAttributes
+            cognitoUser.getUserAttributes(function(err, attributes) {
+                if (err) {
+                    console.error(err);
+                } else {
+                    console.log(attributes);
+                }
             });
-            var myInit = { method: 'GET',
-               headers: authHeader,
-               mode: 'cors',
-               cache: 'default' };
-            var myRequest = new Request(url, myInit);
-            fetch(myRequest).then(response => response.json()).then(data => this.setState(data));
-          });
-        }
+
+            const creds = new AWS.CognitoIdentityCredentials({
+                IdentityPoolId : cogIdPoolId, // your identity pool id here
+                Logins : {
+                    // Change the key below according to the specific region your user pool is in.
+                    'cognito-idp.us-east-1.amazonaws.com/us-east-1_CFgzYswbF' : session.getIdToken().getJwtToken()
+                }
+            }, {region:"us-east-1" });
+            console.log("xxxx");
+            console.log(creds);
+
+            creds.refresh(function(err,data){
+              if(err) console.err(err);
+              else{
+                console.log("refreshed");
+                console.log(creds.accessKeyId);
+                console.log(creds.secretAccessKey);
+                console.log(creds.sessionToken);
+
+                var params = {
+                  param0: 'param0Value',
+                };
+
+                var body = {
+                  "someBody":"someBody"
+                };
+
+                var additionalParams = {
+                  queryParams: {
+                    param0: 'param0value',
+                    param1: 'param1value'
+                  }
+                };
+
+                var apigClient = window.apigClientFactory.newClient({
+                  accessKey: creds.accessKeyId,
+                  secretKey: creds.secretAccessKey,
+                  sessionToken: creds.sessionToken
+                });
+                console.log(apigClient);
+                apigClient.loadPrivateFeaturedGet(params, body, additionalParams)
+                  .then(function(result){
+                    console.log("WHEEEEE");
+                    console.log(result.data);
+                    that.setState(result.data);
+                  }).catch( function(result){
+                    console.error(result);
+                  });
+
+              }
+            });
+            // Instantiate aws sdk service objects now that the credentials have been updated.
+            // example: var s3 = new AWS.S3();
+            const lambda = new AWS.Lambda({
+              region: "us-east-1",
+              credentials: creds
+            });
+            var params = {
+             //ClientContext: "MyApp",
+             FunctionName: "load_private_featured",
+             InvocationType: "RequestResponse",
+             //LogType: "Tail",
+            };
+            // lambda.invoke(params, function(err, data) {
+            //   console.log("Lambda Result");
+            //   if (err) console.log(err, err.stack); // an error occurred
+            //   else  {
+            //     console.log(data);
+            //     var payload = JSON.parse(data.Payload);
+            //     var body = JSON.parse(payload.body);
+            //     console.log(body);
+            //     that.setState(body);
+            //   }
+            // });
+        });
+      }
+    }
+
+    fetchPublicFeaturedAPI(){
+      var params = {
+      };
+
+      var body = {
+      };
+
+      var additionalParams = {
+      };
+
+      var apigClient = window.apigClientFactory.newClient();
+      console.log(apigClient);
+      var that = this;
+      apigClient.loadFeaturedGet(params, body, additionalParams)
+        .then(function(result){
+          console.log(result.data);
+          that.setState(result.data);
+        }).catch( function(result){
+          console.error(result);
+        });
     }
 
     fetchPublicFeatured() {
@@ -194,7 +289,7 @@ class App extends Component {
     }
 
     componentDidMount() {
-        // this.fetchPublicFeatured();
+        //this.fetchPublicFeaturedAPI();
         this.fetchPrivateFeatured();
     }
 }
